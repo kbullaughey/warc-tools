@@ -2,12 +2,12 @@ package main
 
 import (
   "bufio"
-  "compress/gzip"
   "encoding/json"
   "fmt"
   "log"
   "io"
   "os"
+  "os/exec"
   "strings"
   "strconv"
 )
@@ -91,7 +91,7 @@ func nextRecord(reader *bufio.Reader) (*record, error) {
     } else if line == "" {
       continue
     } else {
-      panic("Malformed first line")
+      panic(fmt.Sprintf("Malformed first line: '%s'\n", line))
     }
   }
   rec.header = append(rec.header, line)
@@ -200,27 +200,25 @@ func main() {
   fmt.Printf("Found %d ids\n", len(*ids))
   // Open the compressed WARC metadata file
   meta_fn := "data/CC-MAIN-20130516092621-00000-ip-10-60-113-184.ec2.internal.warc.wat.gz"
-  gzMetaFile, err := os.Open(meta_fn)
-  if err != nil { log.Fatal(err) }
-  // Close file on exit and check for its returned error
-  defer func() {
-    if err := gzMetaFile.Close(); err != nil {
-      log.Fatal(err)
-    }
-  }()
-  // Open a reader to a decompressed stream
-  metaFile, err := gzip.NewReader(gzMetaFile)
+  cmd := exec.Command("gzcat", meta_fn)
+  stdout, err := cmd.StdoutPipe()
   if err != nil {
     log.Fatal(err)
   }
-  // Close the decompression reader
-  defer func() {
-    if err := metaFile.Close(); err != nil {
-      log.Fatal(err)
-    }
-  }()
-  reader := bufio.NewReader(metaFile)
+  stderr, err := cmd.StderrPipe()
+  if err != nil {
+    log.Fatal(err)
+  }
+  if err := cmd.Start(); err != nil {
+    log.Fatal(err)
+  }
+  // Open a reader to the decompressed stream
+  reader := bufio.NewReader(stdout)
+  go io.Copy(os.Stderr, stderr)
   readMeta(reader, ids)
+  if err := cmd.Wait(); err != nil {
+    log.Fatal(err)
+  }
 }
 
 // END
