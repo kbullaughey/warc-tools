@@ -10,93 +10,107 @@ import "sort"
 import "flag"
 import "log"
 import "runtime/pprof"
+import "unicode/utf8"
 
 var chinese_chars_fn = "ordered_characters"
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var memprofile = flag.String("memprofile", "", "write memory profile to this file")
 
 //type record []string
+type warcRecord struct {
+  lines []string
+  id string
+  body string
+}
 
-func recordBody(r []string) *[]string {
+func interpret(r []string) *warcRecord {
+  warc := warcRecord{}
   body := make([]string, 0, 20)
   for _, line := range r {
     if line == "" {
       // Ignore blank lines
       continue
-    } else if len(line) >= 4 && line[:4] == "WARC" {
+    } else if strings.HasPrefix(line, "WARC") {
       // Metadata
       if line == "WARC-Type: warcinfo" {
         // We can discard warcinfo records
         return nil
       }
+      if strings.HasPrefix(line, "WARC-Record-ID: ") {
+        warc.id = line[16:]
+      }
       continue
-    } else if len(line) >= 8 && line[:8] == "Content-" {
+    } else if strings.HasPrefix(line, "Content-") {
       // Discard request info
       continue
     } else {
       body = append(body, line)
     }
   }
-  return &body
+  // Discard blank records
+  if len(body) == 0 { return nil }
+  if warc.id == "" { panic("Record missing ID") }
+  warc.body = strings.Join(body, " ")
+  return &warc
 }
 
 func process(r []string, ch chan string) {
-  body := recordBody(r)
-  threshold := 0.3
+  warc := interpret(r)
+  threshold := 0.4
 
   // Nil records can be safely skipped
-  if body == nil {
+  if warc == nil {
     ch <- ""
     return
   }
 
-  /* Go through the string and make an array of the runes, as we want to
-     operate on characters. */
-  body_str := strings.Join(*body, " ")
-  runes := make([]rune, 0, 100)
-  for _, ru := range body_str {
-    runes = append(runes, ru)
-  }
-
-  var n int = 200
+  var n int = 300
   var c float64
-  if len(runes) <= n {
-    n = len(runes)
-    // Since we have at most n runes, we just use them all
-    for _,ru := range runes {
+  if len(warc.body) <= n {
+    n = 0
+    // Since we have a short string, we look at all characters
+    for _,ru := range warc.body {
       _, ok := chinese_chars[ru]
-      if ok {
-        c += 1.0
-      }
+      if ok { c += 1.0 }
+      n++
     }
     ratio := c/float64(n)
     if ratio > threshold {
-      ch <- body_str
+      ch <- warc.id
     } else {
       ch <- ""
     }
     return
   }
 
-  // Generate random indices uniformly on the rune slice length
+  // Generate random indices uniformly on the number of bytes in the string.
   sample_indices := make([]int, n)
   for i := 0; i < n; i++ {
-    sample_indices[i] = rand.Int() % len(runes)
+    sample_indices[i] = rand.Int() % len(warc.body)
   }
   // Sort the indices so we can find them in order as we go through the string
   sort.Ints(sample_indices)
 
   // Go through and count how many samples are Chinese characters
-  for _, idx := range sample_indices {
-    ru := runes[idx]
-    _, ok := chinese_chars[ru]
-    if ok {
-      c += 1.0
+  var j int // This will keep track of our position in sample_indices
+  var m int // Keep track only of unique characters tested.
+  for k,ru := range warc.body {
+    rune_len := utf8.RuneLen(ru)
+    if sample_indices[j] < k + rune_len {
+      _, ok := chinese_chars[ru]
+      if ok { c += 1.0 }
+      m++
+      // Increment, skipping duplicates
+      for j < n && sample_indices[j] < (k + rune_len) { j++ }
+      // If we've found all our samples, break
+      if j == n { break }
     }
   }
+  if j != n { panic(fmt.Sprintf("Only found %d of %d samples", j, n)) }
   ratio := c/float64(n)
   if ratio > threshold {
-    ch <- body_str
+//    ch <- strings.Join(r, "\n")
+    ch <- warc.id
   } else {
     ch <- ""
   }
@@ -142,7 +156,6 @@ func printResults(ch chan string, count_ch chan int) {
     select {
       case response := <-ch:
         if response != "" {
-          fmt.Println("")
           fmt.Println(response)
         }
         received_count += 1
@@ -156,7 +169,7 @@ func printResults(ch chan string, count_ch chan int) {
   count_ch <- 0
 }
 
-func readWarc() {
+func launch() {
   /*  Channel to tell printResults (after it starts) how many messages it should
       receive. We only know this after we've scheduled all the goroutines */
   count_ch := make(chan int)
@@ -164,9 +177,14 @@ func readWarc() {
   // Channel for sending strings to printResults.
   ch := make(chan string, 100)
 
-  // Launch the printResults goroutine.
   go printResults(ch, count_ch)
+  go readWarc(ch, count_ch)
 
+  // Wait for printing to finish
+  <-count_ch
+}
+
+func readWarc(ch chan string, count_ch chan int) {
   reader := bufio.NewReader(os.Stdin)
   // start with an empty record.
   var rec []string
@@ -174,9 +192,7 @@ func readWarc() {
   for {
     s, err := reader.ReadString('\n')
     if err != nil {
-      if err == io.EOF {
-        fmt.Fprintln(os.Stderr, "Reached EOF")
-      } else {
+      if err != io.EOF {
         fmt.Fprintln(os.Stderr, "ReadString error: ", err)
       }
       break
@@ -194,8 +210,6 @@ func readWarc() {
 
   // tell printResults how many messages it should receive
   count_ch <- responses_to_expect
-  // Wait for printing to finish
-  <-count_ch
   return
 }
 
@@ -208,7 +222,7 @@ func main() {
     defer pprof.StopCPUProfile()
   }
   learnChinese()
-  readWarc()
+  launch()
   if *memprofile != "" {
     f, err := os.Create(*memprofile)
     if err != nil { log.Fatal(err) }
