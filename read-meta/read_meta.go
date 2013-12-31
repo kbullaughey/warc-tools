@@ -197,7 +197,6 @@ func getRecordSubset() *recordSet {
 
 func main() {
   ids := getRecordSubset()
-  fmt.Printf("Found %d ids\n", len(*ids))
   // Open the compressed WARC metadata file
   meta_fn := "data/CC-MAIN-20130516092621-00000-ip-10-60-113-184.ec2.internal.warc.wat.gz"
   cmd := exec.Command("gzcat", meta_fn)
