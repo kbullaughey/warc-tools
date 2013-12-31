@@ -153,7 +153,7 @@ func learnChinese() {
   }
 }
 
-func printResults(ch chan string, count_ch chan int) {
+func printResults(ch chan string, count_ch chan int, done_ch chan int) {
   // We should receive one result per goroutine
   var expecting int
   var received_count int = 1
@@ -171,22 +171,24 @@ func printResults(ch chan string, count_ch chan int) {
     }
   }
   // Indicate we're done.
-  count_ch <- 0
+  fmt.Fprintf(os.Stderr, "Processed %d records\n", received_count)
+  done_ch <- 0
 }
 
 func launch() {
   /*  Channel to tell printResults (after it starts) how many messages it should
       receive. We only know this after we've scheduled all the goroutines */
   count_ch := make(chan int)
+  done_ch := make(chan int)
 
   // Channel for sending strings to printResults.
   ch := make(chan string, 100)
 
-  go printResults(ch, count_ch)
+  go printResults(ch, count_ch, done_ch)
   go readWarc(ch, count_ch)
 
   // Wait for printing to finish
-  <-count_ch
+  <-done_ch
 }
 
 func readWarc(ch chan string, count_ch chan int) {
@@ -235,6 +237,7 @@ func main() {
     f.Close()
     return
   }
+  fmt.Fprintln(os.Stderr, "Done")
 }
 
 // END
