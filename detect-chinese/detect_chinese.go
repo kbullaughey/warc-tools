@@ -12,7 +12,7 @@ import "log"
 import "runtime/pprof"
 import "unicode/utf8"
 
-var chinese_chars_fn = "ordered_characters"
+var chinese_chars_fn = "detect-chinese/ordered_characters"
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var memprofile = flag.String("memprofile", "", "write memory profile to this file")
 
@@ -56,7 +56,7 @@ func interpret(r []string) *warcRecord {
 
 func process(r []string, ch chan string) {
   warc := interpret(r)
-  threshold := 0.4
+  threshold := 0.35
 
   // Nil records can be safely skipped
   if warc == nil {
@@ -64,7 +64,7 @@ func process(r []string, ch chan string) {
     return
   }
 
-  var n int = 300
+  var n int = 500
   var c float64
   if len(warc.body) <= n {
     n = 0
@@ -122,7 +122,12 @@ var chinese_chars runemap
 
 func learnChinese() {
   chinese_chars = make(runemap)
-  in, err := os.Open(chinese_chars_fn)
+  root := os.Getenv("WARC_TOOLS_DIR")
+  if root == "" {
+    log.Fatal("Must have WARC_TOOLS_DIR set")
+  }
+  chinese_chars_path := fmt.Sprintf("%s/%s", root, chinese_chars_fn)
+  in, err := os.Open(chinese_chars_path)
   if err != nil { panic(err) }
   // close file on exit and check for its returned error
   defer func() {
