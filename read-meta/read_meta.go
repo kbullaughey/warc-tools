@@ -7,7 +7,6 @@ import (
   "log"
   "io"
   "os"
-  "os/exec"
   "strings"
   "strconv"
 )
@@ -180,9 +179,16 @@ type recordSet map[string]bool
 
 /* Build a map of records that we'll look for in the metadata. These come
    from stdin. */
-func getRecordSubset() *recordSet {
+func getRecordSubset(fn string) *recordSet {
   set := make(recordSet, 100)
-  reader := bufio.NewReader(os.Stdin)
+  file, err := os.Open(fn)
+  if err != nil { log.Fatal(err) }
+  defer func() {
+    if err = file.Close(); err != nil {
+      log.Fatal("Failed to close file")
+    }
+  }()
+  reader := bufio.NewReader(file)
   for {
     line, err := reader.ReadString('\n')
     if err != nil {
@@ -196,28 +202,12 @@ func getRecordSubset() *recordSet {
 }
 
 func main() {
-  ids := getRecordSubset()
-  // Open the compressed WARC metadata file
-  meta_fn := "data/CC-MAIN-20130516092621-00000-ip-10-60-113-184.ec2.internal.warc.wat.gz"
-  cmd := exec.Command("gzcat", meta_fn)
-  stdout, err := cmd.StdoutPipe()
-  if err != nil {
-    log.Fatal(err)
+  if len(os.Args) != 2 {
+    log.Fatal("Must provide argument")
   }
-  stderr, err := cmd.StderrPipe()
-  if err != nil {
-    log.Fatal(err)
-  }
-  if err := cmd.Start(); err != nil {
-    log.Fatal(err)
-  }
-  // Open a reader to the decompressed stream
-  reader := bufio.NewReader(stdout)
-  go io.Copy(os.Stderr, stderr)
+  ids := getRecordSubset(os.Args[1])
+  reader := bufio.NewReader(os.Stdin)
   readMeta(reader, ids)
-  if err := cmd.Wait(); err != nil {
-    log.Fatal(err)
-  }
 }
 
 // END
