@@ -36,7 +36,7 @@ func interpret(r []string) *warcRecord {
         // We can discard warcinfo records
         return nil
       }
-      if strings.HasPrefix(line, "WARC-Record-ID: ") {
+      if strings.HasPrefix(line, "WARC-Refers-To: ") {
         warc.id = line[16:]
       }
       continue
